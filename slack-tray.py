@@ -9,6 +9,9 @@ from pprint import pprint
 import json
 from collections import defaultdict
 import itertools
+from threading import Thread
+import gtk
+import gobject
 
 
 def get_rtm_info(client):
@@ -23,7 +26,7 @@ def get_rtm_info(client):
 def build_highlight_re(words):
     words = [re.escape(word) for word in words]
 
-    return re.compile(r'(^|_|\W)(%s)(_|\W|$)' % "|".join(words), re.I)
+    return re.compile(r'(^|_|\W)(%s)(?!@)(_|\W|$)' % "|".join(words), re.I)
 
 
 def shell_escape(string):
@@ -51,6 +54,21 @@ def pm(message):
     play("/usr/share/sounds/purple/alert.wav")
     notify("Slack PM", message)
 
+
+class TrayIcon(object):
+    def __init__(self):
+        self.icon = gtk.StatusIcon()
+        self.icon.set_visible(False)
+        self.color = None
+
+    def set_color(self, color):
+        gobject.idle_add(self._set_color, color)
+
+    def _set_color(self, color):
+        if color != self.color:
+            self.color = color
+            self.icon.set_from_file(os.path.join(os.path.dirname(__file__), "slack_%s.png" % color))
+            self.icon.set_visible(True)
 
 
 class Channel(object):
@@ -96,7 +114,7 @@ def main():
     highlight_words = info['self']['prefs']['highlight_words'].split(',') + [info['self']['name'], "<@%s>" % info['self']['id']]
     highlight_re = build_highlight_re(highlight_words)
 
-    print highlight_re.pattern
+    print "will ping on:", highlight_re.pattern
 
     channels = defaultdict(Channel)
 
@@ -105,8 +123,6 @@ def main():
             channels[channel['id']].update_marker(channel['last_read'])
 
     client.rtm_connect()
-
-    status = None
 
     while True:
         messages = client.rtm_read()
@@ -122,7 +138,7 @@ def main():
 
                 if text and highlight_re.search(text):
                     channels[channel].add_highlight(timestamp)
-                    ping("%s: %s" % (client.channels.find(channel).name, text)
+                    ping("%s: %s" % (client.server.channels.find(channel).name, text))
 
             elif mtype in ('channel_marked', 'im_marked', 'group_marked'):
                 channels[channel].update_marker(timestamp)
@@ -134,18 +150,20 @@ def main():
         unmuted_channels = [channel for name, channel in channels.iteritems() if name not in muted_channels]
 
         if any(channel.is_highlighted() for channel in channels.itervalues()):
-            new_status = "red"
+            tray_icon.set_color("red")
         elif any(channel.is_unread() for channel in unmuted_channels):
-            new_status = "yellow"
+            tray_icon.set_color("yellow")
         else:
-            new_status = "green"
-
-        if new_status != status:
-            status = new_status
-            print time.time(), status
+            tray_icon.set_color("green")
 
         time.sleep(0.2)
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    gobject.threads_init()
+    tray_icon = TrayIcon()
+    Thread(target=main).start()
+    try:
+        gtk.main()
+    except KeyboardInterrupt:
+        os._exit(0)
