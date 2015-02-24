@@ -124,37 +124,52 @@ def main():
 
     client.rtm_connect()
 
+    last_ping = time.time()
+    last_pong = time.time()
+
     while True:
         messages = client.rtm_read()
 
-        for message in messages:
-            channel = message.get('channel')
-            timestamp = message.get('ts')
-            mtype = message.get('type')
-            text = message.get('text')
-
-            if mtype == 'message':
-                channels[channel].add_unread(timestamp)
-
-                if text and highlight_re.search(text):
-                    channels[channel].add_highlight(timestamp)
-                    ping("%s: %s" % (client.server.channels.find(channel).name, text))
-
-            elif mtype in ('channel_marked', 'im_marked', 'group_marked'):
-                channels[channel].update_marker(timestamp)
-
         if messages:
-            #print channels
-            pass
+            for message in messages:
+                channel = message.get('channel')
+                timestamp = message.get('ts')
+                mtype = message.get('type')
+                text = message.get('text')
 
-        unmuted_channels = [channel for name, channel in channels.iteritems() if name not in muted_channels]
+                if mtype == 'message':
+                    channels[channel].add_unread(timestamp)
 
-        if any(channel.is_highlighted() for channel in channels.itervalues()):
-            tray_icon.set_color("red")
-        elif any(channel.is_unread() for channel in unmuted_channels):
-            tray_icon.set_color("yellow")
-        else:
-            tray_icon.set_color("green")
+                    if text and highlight_re.search(text):
+                        channels[channel].add_highlight(timestamp)
+                        ping("%s: %s" % (client.server.channels.find(channel).name, text))
+
+                elif mtype in ('channel_marked', 'im_marked', 'group_marked'):
+                    channels[channel].update_marker(timestamp)
+                elif mtype == "pong":
+                    last_pong = time.time()
+
+            if messages:
+                #print channels
+                pass
+
+            unmuted_channels = [channel for name, channel in channels.iteritems() if name not in muted_channels]
+
+            if any(channel.is_highlighted() for channel in channels.itervalues()):
+                tray_icon.set_color("red")
+            elif any(channel.is_unread() for channel in unmuted_channels):
+                tray_icon.set_color("yellow")
+            else:
+                tray_icon.set_color("green")
+
+        if time.time() - last_pong > 60:
+            print "lost connection, reconnecting..."
+            client.rtm_connect()
+            last_pong = time.time()
+
+        if time.time() - last_ping > 30:
+            client.server.ping()
+            last_ping = time.time()
 
         time.sleep(0.2)
 
