@@ -1,0 +1,3 @@
+ * handle channel name lookup failure
+ * don't ping on topic changes
+ * don't ping for things you say
