@@ -4,6 +4,7 @@ import sys
 import os
 import time
 import re
+import socket
 from slackclient import SlackClient
 from pprint import pprint
 import json
@@ -162,14 +163,17 @@ def main():
             else:
                 tray_icon.set_color("green")
 
+        try:
+            if time.time() - last_ping > 30:
+                client.server.ping()
+                last_ping = time.time()
+        except socket.error:
+            last_pong = 0
+
         if time.time() - last_pong > 60:
             print "lost connection, reconnecting..."
             client.rtm_connect()
             last_pong = time.time()
-
-        if time.time() - last_ping > 30:
-            client.server.ping()
-            last_ping = time.time()
 
         time.sleep(0.2)
 
