@@ -1,3 +1,7 @@
  * handle channel name lookup failure
  * don't ping on topic changes
  * don't ping for things you say
+ * blacklist channels from hilights
+ * different sound for PMs
+ * always mark messages as read in certain channels
+ * blacklist certain regexes from highlights?
