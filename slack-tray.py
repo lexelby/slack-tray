@@ -15,6 +15,20 @@ import gtk
 import gobject
 
 
+# This class can be used as a decorator to cache the results of function
+# calls.
+class memoize(dict):
+    def __init__(self, f):
+        self.f = f
+
+    def __call__(self, *args):
+        return self[args]
+
+    def __missing__(self, key):
+        ret = self[key] = self.f(*key)
+        return ret
+
+
 def get_rtm_info(client):
     # Apparently the only way to do this is to call rtm.start.  SlackClient
     # doesn't return the full results from that call, so we'll call it
@@ -22,6 +36,56 @@ def get_rtm_info(client):
 
     info = json.loads(client.api_call('rtm.start'))
     return info
+
+
+@memoize
+def get_user_name(client, id):
+    response = json.loads(client.api_call("users.info", user=id))
+
+    if response.get("ok"):
+        return response['user']['name']
+    else:
+        return "<UNKNOWN>"
+
+
+def unlistify(thing):
+    # For some stupid reason server.channels.find() returns either a single item
+    # or a list.  They coded it specifically to do this and now I have to code
+    # around it.
+    if isinstance(thing, (list, tuple)):
+        return thing[0]
+    else:
+        return thing
+
+
+@memoize
+def get_channel_name(client, id):
+    channel = client.server.channels.find(id)
+
+    if id[0] != "D" and channel is not None:
+        return unlistify(channel).name
+    else:
+        if id[0] == "C":
+            response = json.loads(client.api_call("channels.info", channel=id))
+
+            if response.get("ok"):
+                return "#" + response["channel"]["name"]
+        elif id[0] == "G":
+            response = json.loads(client.api_call("groups.list"))
+
+            if response.get("ok"):
+                for group in response['groups']:
+                    if group['id'] == id:
+                        return group['name']
+        elif id[0] == "D":
+            response = json.loads(client.api_call("im.list"))
+
+            if response.get("ok"):
+                for im in response['ims']:
+                    if im['id'] == id:
+                        return "IM: " + get_user_name(client, im['user'])
+
+    return "<UNKNOWN>"
 
 
 def build_highlight_re(words):
@@ -137,13 +201,16 @@ def main():
                 timestamp = message.get('ts')
                 mtype = message.get('type')
                 text = message.get('text')
+                user = message.get('user')
 
                 if mtype == 'message':
                     channels[channel].add_unread(timestamp)
 
-                    if text and highlight_re.search(text):
+                    # Direct messages (IMs) are treated as highlights
+                    if (channel[0] == "D" and user != info['self']['id']) or \
+                            (text and highlight_re.search(text)):
                         channels[channel].add_highlight(timestamp)
-                        ping("%s: %s" % (client.server.channels.find(channel).name, text))
+                        ping("%s: %s" % (get_channel_name(client, channel), text))
 
                 elif mtype in ('channel_marked', 'im_marked', 'group_marked'):
                     channels[channel].update_marker(timestamp)
