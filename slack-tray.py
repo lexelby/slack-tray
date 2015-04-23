@@ -13,6 +13,10 @@ import itertools
 from threading import Thread
 import gtk
 import gobject
+import yaml
+
+
+config = {}
 
 
 # This class can be used as a decorator to cache the results of function
@@ -27,6 +31,31 @@ class memoize(dict):
     def __missing__(self, key):
         ret = self[key] = self.f(*key)
         return ret
+
+
+class DotDict(dict):
+    """Allows attribute-like access."""
+
+    def __getattr__(self, attr):
+        try:
+            return self[attr]
+        except KeyError:
+            raise AttributeError("'DotDict' object has no attribute '%s'")
+
+
+# The following magic makes yaml use DotDict instead of dict
+def dotdict_constructor(loader, node):
+    return DotDict(loader.construct_pairs(node))
+
+
+yaml.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, dotdict_constructor)
+
+
+def read_config(path):
+    global config
+
+    with open(path) as config_file:
+        config = yaml.load(config_file)
 
 
 def get_rtm_info(client):
@@ -168,11 +197,11 @@ class Channel(object):
 
 def main():
     if len(sys.argv) != 2:
-        return "usage: %s <API key>" % sys.argv[0]
+        return "usage: %s <config file>" % sys.argv[0]
 
-    api_key = sys.argv[1]
+    read_config(sys.argv[1])
 
-    client = SlackClient(api_key)
+    client = SlackClient(config.api_key)
 
     info = get_rtm_info(client)
     muted_channels = info['self']['prefs']['muted_channels'].split(',')
