@@ -207,10 +207,11 @@ def main():
                     channels[channel].add_unread(timestamp)
 
                     # Direct messages (IMs) are treated as highlights
-                    if (channel[0] == "D" and user != info['self']['id']) or \
-                            (text and highlight_re.search(text)):
-                        channels[channel].add_highlight(timestamp)
-                        ping("%s: %s" % (get_channel_name(client, channel), text))
+                    if user != info['self']['id'] and \
+                        (channel[0] == "D" or
+                         (text and highlight_re.search(text))):
+                            channels[channel].add_highlight(timestamp)
+                            ping("%s: %s" % (get_channel_name(client, channel), text))
 
                 elif mtype in ('channel_marked', 'im_marked', 'group_marked'):
                     channels[channel].update_marker(timestamp)
