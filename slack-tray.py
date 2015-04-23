@@ -140,12 +140,12 @@ def notify(subject, message):
 
 def ping(message):
     print "pinged"
-    play("/usr/share/sounds/purple/receive.wav")
+    play(config.sounds.ping)
     notify("Slack Chat", message)
 
 def pm(message):
     print "pm received"
-    play("/usr/share/sounds/purple/alert.wav")
+    play(config.sounds.pm)
     notify("Slack PM", message)
 
 
@@ -207,8 +207,7 @@ def main():
     muted_channels = info['self']['prefs']['muted_channels'].split(',')
     highlight_words = info['self']['prefs']['highlight_words'].split(',') + [info['self']['name'], "<@%s>" % info['self']['id']]
     highlight_re = build_highlight_re(highlight_words)
-
-    print "will ping on:", highlight_re.pattern
+    no_highlight_re = build_highlight_re(config.highlight.get('blacklist_words', []))
 
     channels = defaultdict(Channel)
 
@@ -220,6 +219,8 @@ def main():
 
     last_ping = time.time()
     last_pong = time.time()
+
+    print "ready"
 
     while True:
         messages = client.rtm_read()
@@ -235,13 +236,19 @@ def main():
                 if mtype == 'message':
                     channels[channel].add_unread(timestamp)
 
-                    # Direct messages (IMs) are treated as highlights
-                    if user != info['self']['id'] and \
-                        (channel[0] == "D" or
-                         (text and highlight_re.search(text))):
-                            channels[channel].add_highlight(timestamp)
-                            ping("%s: %s" % (get_channel_name(client, channel), text))
+                    if user != info['self']['id']:
+                        notification_function = None
 
+                        if channel[0] == 'D':
+                            notification_function = pm
+                        elif text and highlight_re.search(text) and not \
+                            ('blacklist_words' in config.highlight and
+                             no_highlight_re.search(text)):
+                                notification_function = ping
+
+                        if notification_function:
+                            channels[channel].add_highlight(timestamp)
+                            notification_function("%s: %s" % (get_channel_name(client, channel), text))
                 elif mtype in ('channel_marked', 'im_marked', 'group_marked'):
                     channels[channel].update_marker(timestamp)
                 elif mtype == "pong":
