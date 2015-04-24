@@ -14,6 +14,7 @@ from threading import Thread
 import gtk
 import gobject
 import yaml
+from collections import defaultdict
 
 
 config = {}
@@ -33,14 +34,18 @@ class memoize(dict):
         return ret
 
 
-class DotDict(dict):
-    """Allows attribute-like access."""
+class DotDict(defaultdict):
+    """Allows attribute-like access.  Returns {} when an item is accessed that
+    is not in the dict."""
+
+    def __init__(self, *args, **kwargs):
+        super(DotDict, self).__init__(dict, *args, **kwargs)
 
     def __getattr__(self, attr):
         try:
             return self[attr]
         except KeyError:
-            raise AttributeError("'DotDict' object has no attribute '%s'")
+            return self.__missing__(attr)
 
 
 # The following magic makes yaml use DotDict instead of dict
@@ -207,7 +212,7 @@ def main():
     muted_channels = info['self']['prefs']['muted_channels'].split(',')
     highlight_words = info['self']['prefs']['highlight_words'].split(',') + [info['self']['name'], "<@%s>" % info['self']['id']]
     highlight_re = build_highlight_re(highlight_words)
-    no_highlight_re = build_highlight_re(config.notify.get('blacklist_words', []))
+    no_highlight_re = build_highlight_re(config.notify.blacklist_words)
 
     channels = defaultdict(Channel)
 
@@ -237,14 +242,13 @@ def main():
                     channels[channel].add_unread(timestamp)
                     channel_name = get_channel_name(client, channel)
 
-                    if user != info['self']['id'] and channel_name not in config.notify.get('blacklist_channels', []):
+                    if user != info['self']['id'] and channel_name not in config.notify.blacklist_channels:
                         notification_function = None
 
                         if channel[0] == 'D':
                             notification_function = pm
                         elif text and highlight_re.search(text) and not \
-                            ('blacklist_words' in config.notify and
-                             no_highlight_re.search(text)):
+                            (config.notify.blacklist_words and no_highlight_re.search(text)):
                                 notification_function = ping
 
                         if notification_function:
