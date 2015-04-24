@@ -97,7 +97,12 @@ def get_channel_name(client, id):
     channel = client.server.channels.find(id)
 
     if id[0] != "D" and channel is not None:
-        return unlistify(channel).name
+        name = unlistify(channel).name
+
+        if id[0] == "C":
+            name = "#" + name
+
+        return name
     else:
         if id[0] == "C":
             response = json.loads(client.api_call("channels.info", channel=id))
