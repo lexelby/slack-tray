@@ -207,7 +207,7 @@ def main():
     muted_channels = info['self']['prefs']['muted_channels'].split(',')
     highlight_words = info['self']['prefs']['highlight_words'].split(',') + [info['self']['name'], "<@%s>" % info['self']['id']]
     highlight_re = build_highlight_re(highlight_words)
-    no_highlight_re = build_highlight_re(config.highlight.get('blacklist_words', []))
+    no_highlight_re = build_highlight_re(config.notify.get('blacklist_words', []))
 
     channels = defaultdict(Channel)
 
@@ -237,13 +237,13 @@ def main():
                     channels[channel].add_unread(timestamp)
                     channel_name = get_channel_name(client, channel)
 
-                    if user != info['self']['id'] and channel_name not in config.highlight.get('blacklist_channels', []):
+                    if user != info['self']['id'] and channel_name not in config.notify.get('blacklist_channels', []):
                         notification_function = None
 
                         if channel[0] == 'D':
                             notification_function = pm
                         elif text and highlight_re.search(text) and not \
-                            ('blacklist_words' in config.highlight and
+                            ('blacklist_words' in config.notify and
                              no_highlight_re.search(text)):
                                 notification_function = ping
 
