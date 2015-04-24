@@ -122,6 +122,18 @@ def get_channel_name(client, id):
     return "<UNKNOWN>"
 
 
+def mark_read(client, channel, timestamp):
+    kwargs = dict(channel=channel, timestamp=timestamp)
+
+    # Why can't you do this for me, slack?
+    if channel.startswith('C'):
+        client.api_call("channels.mark", **kwargs)
+    elif channel.startswith('G'):
+        client.api_call("groups.mark", **kwargs)
+    elif channel.startswith('D'):
+        client.api_call("im.mark", **kwargs)
+
+
 def build_highlight_re(words):
     words = [re.escape(word) for word in words]
 
@@ -254,6 +266,10 @@ def main():
                         if notification_function:
                             channels[channel].add_highlight(timestamp)
                             notification_function("%s: %s" % (channel_name, text))
+
+                    if channel_name in config.mark_read_channels:
+                        channels[channel].update_marker(timestamp)
+                        mark_read(client, channel, timestamp)
                 elif mtype in ('channel_marked', 'im_marked', 'group_marked'):
                     channels[channel].update_marker(timestamp)
                 elif mtype == "pong":
