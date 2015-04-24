@@ -235,8 +235,9 @@ def main():
 
                 if mtype == 'message':
                     channels[channel].add_unread(timestamp)
+                    channel_name = get_channel_name(client, channel)
 
-                    if user != info['self']['id']:
+                    if user != info['self']['id'] and channel_name not in config.highlight.get('blacklist_channels', []):
                         notification_function = None
 
                         if channel[0] == 'D':
@@ -248,7 +249,7 @@ def main():
 
                         if notification_function:
                             channels[channel].add_highlight(timestamp)
-                            notification_function("%s: %s" % (get_channel_name(client, channel), text))
+                            notification_function("%s: %s" % (channel_name, text))
                 elif mtype in ('channel_marked', 'im_marked', 'group_marked'):
                     channels[channel].update_marker(timestamp)
                 elif mtype == "pong":
