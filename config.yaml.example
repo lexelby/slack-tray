@@ -15,12 +15,13 @@ notify:
         - word2
 
     # Never notify if a message is sent on these channels.  Note that
-    # private channels don't use a #.
+    # private channels don't use a #.  Don't forget to use quotes if
+    # you specify a channel with a #, because a # starts a yaml comment.
     blacklist_channels:
         - privategroup1
-        - #publichannel2
+        - '#publichannel2'
 
 # Always mark messages in these channels read immediately.
 mark_read_channels:
     - privategroup1
-    - #publichannel2
+    - '#publichannel2'
