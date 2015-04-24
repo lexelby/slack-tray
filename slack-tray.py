@@ -141,6 +141,7 @@ def mark_read(client, channel, timestamp):
     # Cause gobject not to reschedule this function call.
     return False
 
+
 def build_highlight_re(words):
     words = [re.escape(word) for word in words]
 
@@ -166,6 +167,7 @@ def ping(message):
     print "pinged"
     play(config.sounds.ping)
     notify("Slack Chat", message)
+
 
 def pm(message):
     print "pm received"
@@ -269,8 +271,8 @@ def main():
                         if channel[0] == 'D':
                             notification_function = pm
                         elif text and highlight_re.search(text) and not \
-                            (config.notify.blacklist_words and no_highlight_re.search(text)):
-                                notification_function = ping
+                                (config.notify.blacklist_words and no_highlight_re.search(text)):
+                            notification_function = ping
 
                         if notification_function:
                             channels[channel].add_highlight(timestamp)
@@ -285,7 +287,7 @@ def main():
                     last_pong = time.time()
 
             if messages:
-                #print channels
+                # print channels
                 pass
 
             unmuted_channels = [channel for name, channel in channels.iteritems() if name not in muted_channels]
