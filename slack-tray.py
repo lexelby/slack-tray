@@ -123,7 +123,7 @@ def get_channel_name(client, id):
 
 
 def mark_read(client, channel, timestamp):
-    kwargs = dict(channel=channel, timestamp=timestamp)
+    kwargs = dict(channel=channel, ts=timestamp)
 
     # Why can't you do this for me, slack?
     if channel.startswith('C'):
@@ -133,6 +133,8 @@ def mark_read(client, channel, timestamp):
     elif channel.startswith('D'):
         client.api_call("im.mark", **kwargs)
 
+    # Cause gobject not to reschedule this function call.
+    return False
 
 def build_highlight_re(words):
     words = [re.escape(word) for word in words]
@@ -180,6 +182,8 @@ class TrayIcon(object):
             self.color = color
             self.icon.set_from_file(os.path.join(os.path.dirname(__file__), "slack_%s.png" % color))
             self.icon.set_visible(True)
+
+        return False
 
 
 class Channel(object):
@@ -269,7 +273,7 @@ def main():
 
                     if channel_name in config.mark_read_channels:
                         channels[channel].update_marker(timestamp)
-                        mark_read(client, channel, timestamp)
+                        gobject.idle_add(mark_read, client, channel, timestamp)
                 elif mtype in ('channel_marked', 'im_marked', 'group_marked'):
                     channels[channel].update_marker(timestamp)
                 elif mtype == "pong":
