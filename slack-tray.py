@@ -153,7 +153,7 @@ def shell_escape(string):
 
 
 def play(sound):
-    os.system("/usr/bin/paplay %s" % sound)
+    os.system("/usr/bin/paplay -n slack-tray %s" % sound)
 
 
 def notify(subject, message):
