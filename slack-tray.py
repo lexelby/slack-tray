@@ -15,8 +15,9 @@ import gtk
 import gobject
 import yaml
 from collections import defaultdict
+import traceback
 
-
+AT_HERE_RE = re.compile('<!(here|group|everyone|channel)(|[a-z]+)?>', re.I)
 config = {}
 
 
@@ -27,7 +28,12 @@ class memoize(dict):
         self.f = f
 
     def __call__(self, *args):
-        return self[args]
+        try:
+            return self[args]
+        except TypeError:
+            print "error memoizing:"
+            traceback.print_exc()
+            return self.f(*args)
 
     def __missing__(self, key):
         ret = self[key] = self.f(*key)
@@ -35,11 +41,11 @@ class memoize(dict):
 
 
 class DotDict(defaultdict):
-    """Allows attribute-like access.  Returns {} when an item is accessed that
-    is not in the dict."""
+    """Allows attribute-like access.  Returns an empty DotDict when an item is
+    accessed that is not in the dict."""
 
     def __init__(self, *args, **kwargs):
-        super(DotDict, self).__init__(dict, *args, **kwargs)
+        super(DotDict, self).__init__(DotDict, *args, **kwargs)
 
     def __getattr__(self, attr):
         try:
@@ -64,17 +70,30 @@ def read_config(path):
 
 
 def get_rtm_info(client):
-    # Apparently the only way to do this is to call rtm.start.  SlackClient
-    # doesn't return the full results from that call, so we'll call it
-    # here too.
+    # Apparently the only way to get this info is to call rtm.start.
+    # SlackClient doesn't return the full results from rtm_connect(),
+    # so we'll call it here too.
 
-    info = json.loads(client.api_call('rtm.start'))
-    return info
+    return client.api_call('rtm.start')
+
+
+def update_starred_channels(client):
+    try:
+        response = client.api_call('stars.list')
+        stars = response['items']
+        starred_channels = [star['channel'] for star in stars if star['type'] in ('channel', 'group')]
+        config.starred_channels = starred_channels
+    except:
+        traceback.print_exc()
+
+    # print 'starred channels:', config.starred_channels
+
+    return True
 
 
 @memoize
 def get_user_name(client, id):
-    response = json.loads(client.api_call("users.info", user=id))
+    response = client.api_call("users.info", user=id)
 
     if response.get("ok"):
         return response['user']['name']
@@ -94,6 +113,9 @@ def unlistify(thing):
 
 @memoize
 def get_channel_name(client, id):
+    if not id:
+        return None
+
     channel = client.server.channels.find(id)
 
     if id[0] != "D" and channel is not None:
@@ -105,19 +127,19 @@ def get_channel_name(client, id):
         return name
     else:
         if id[0] == "C":
-            response = json.loads(client.api_call("channels.info", channel=id))
+            response = client.api_call("channels.info", channel=id)
 
             if response.get("ok"):
                 return "#" + response["channel"]["name"]
         elif id[0] == "G":
-            response = json.loads(client.api_call("groups.list"))
+            response = client.api_call("groups.list")
 
             if response.get("ok"):
                 for group in response['groups']:
                     if group['id'] == id:
                         return group['name']
         elif id[0] == "D":
-            response = json.loads(client.api_call("im.list"))
+            response = client.api_call("im.list")
 
             if response.get("ok"):
                 for im in response['ims']:
@@ -127,7 +149,18 @@ def get_channel_name(client, id):
     return "<UNKNOWN>"
 
 
+def render(client, text):
+    def name_getter(function):
+        return lambda match: function(client, match.group(1))
+
+    text = re.sub("<#([^>]+)>", name_getter(get_channel_name), text)
+    text = re.sub("<@([^>]+)>", name_getter(get_user_name), text)
+
+    return text
+
 def mark_read(client, channel, timestamp):
+    #print "mark_read(", client, channel, timestamp, ")"
+
     kwargs = dict(channel=channel, ts=timestamp)
 
     # Why can't you do this for me, slack?
@@ -141,9 +174,26 @@ def mark_read(client, channel, timestamp):
     # Cause gobject not to reschedule this function call.
     return False
 
+def log_ping(client, channel_name, user, message):
+    # aggregate pings under "slackbot"
+    #
+    # as_user=false and channel=@<my username> causes message to appear under
+    # "slackbot".  username=channel_name causes the channel name to appear as
+    # a heading of sorts.
+
+    print "log_ping", channel_name, user, message
+
+    client.api_call('chat.postMessage',
+        as_user=False,
+        channel='@%s' % client.server.username,
+        username=channel_name,
+        text='%s: %s' % (user, message))
+
+    # Cause gobject not to reschedule this function call.
+    return False
 
 def build_highlight_re(words):
-    words = [re.escape(word) for word in words]
+    words = [re.escape(word) for word in words if word]
 
     return re.compile(r'(^|_|\W)(%s)(?!@)(_|\W|$)' % "|".join(words), re.I)
 
@@ -164,15 +214,21 @@ def notify(subject, message):
 
 
 def ping(message):
-    print "pinged"
+    print "PING:", message
     play(config.sounds.ping)
     notify("Slack Chat", message)
 
 
 def pm(message):
-    print "pm received"
+    print "PM:", message
     play(config.sounds.pm)
     notify("Slack PM", message)
+
+
+def email(subject, message):
+    print "EMAIL:", message
+    play(config.sounds.email)
+    notify(subject, message)
 
 
 class TrayIcon(object):
@@ -222,8 +278,7 @@ class Channel(object):
         else:
             return "<READ>"
 
-
-def main():
+def mainLoop():
     if len(sys.argv) != 2:
         return "usage: %s <config file>" % sys.argv[0]
 
@@ -236,6 +291,10 @@ def main():
     highlight_words = info['self']['prefs']['highlight_words'].split(',') + [info['self']['name'], "<@%s>" % info['self']['id']]
     highlight_re = build_highlight_re(highlight_words)
     no_highlight_re = build_highlight_re(config.notify.blacklist_words)
+
+    if config.mark_unstarred_channels_as_read:
+        update_starred_channels(client)
+        gobject.timeout_add(60000, update_starred_channels, client)
 
     channels = defaultdict(Channel)
 
@@ -256,41 +315,65 @@ def main():
         if messages:
             for message in messages:
                 channel = message.get('channel')
+                if isinstance(channel, basestring):
+                    channel_name = get_channel_name(client, channel)
+                elif channel is None:
+                    channel_name = None
+                else:
+                    print "wtf is this channel: ", type(channel), repr(channel), channel
+
+                channel_name = get_channel_name(client, channel)
                 timestamp = message.get('ts')
                 mtype = message.get('type')
-                text = message.get('text')
+                msubtype = message.get('subtype')
+                text = message.get('text', "")
                 user = message.get('user')
 
-                if mtype == 'message':
-                    channels[channel].add_unread(timestamp)
-                    channel_name = get_channel_name(client, channel)
+                #print "rtm_debug:", message
+                #print channel, channel_name
 
-                    if user != info['self']['id'] and channel_name not in config.notify.blacklist_channels:
-                        notification_function = None
+                if (mtype == 'message'
+                    and msubtype in (None, "bot_message", "me_message")
+                    and user is not None
+                    and user != "USLACKBOT"):
+                        channels[channel].add_unread(timestamp)
+                        is_muted = channel in muted_channels
+                        is_highlight = highlight_re.search(text) and not (config.notify.blacklist_words and no_highlight_re.search(text))
+                        is_at_here = not is_muted and AT_HERE_RE.search(text)
+                        is_pm = channel.startswith('D') or channel_name.startswith("mpdm-")
 
-                        if channel[0] == 'D':
-                            notification_function = pm
-                        elif text and highlight_re.search(text) and not \
-                                (config.notify.blacklist_words and no_highlight_re.search(text)):
-                            notification_function = ping
+                        if user != info['self']['id'] and channel_name not in config.notify.blacklist_channels:
+                            notification_function = None
 
-                        if notification_function:
-                            channels[channel].add_highlight(timestamp)
-                            notification_function("%s: %s" % (channel_name, text))
+                            if is_pm:
+                                notification_function = pm
+                            elif is_highlight or is_at_here:
+                                if config.log_pings and channel in muted_channels:
+                                    gobject.idle_add(log_ping, client, channel_name, get_user_name(client, user), render(client, text))
 
-                    if channel_name in config.mark_read_channels:
-                        channels[channel].update_marker(timestamp)
-                        gobject.idle_add(mark_read, client, channel, timestamp)
+                                notification_function = ping
+
+                            if notification_function:
+                                channels[channel].add_highlight(timestamp)
+                                notification_function("%s %s: %s" % (channel_name, get_user_name(client, user), render(client, text)))
+                        if channel_name in config.mark_read_channels or is_muted:
+                                # print "mark read:", channel
+                                channels[channel].update_marker(timestamp)
+                                gobject.idle_add(mark_read, client, channel, timestamp)
+                elif (channel_name in config.notify.email_ping_channels
+                      and mtype == "message" and message.get('upload')):
+                        email(message['username'], message['file']['title'])
                 elif mtype in ('channel_marked', 'im_marked', 'group_marked'):
                     channels[channel].update_marker(timestamp)
                 elif mtype == "pong":
                     last_pong = time.time()
 
-            if messages:
-                # print channels
-                pass
+#            if messages:
+#                for id, channel in channels.iteritems():
+#                    if channel.is_unread():
+#                        print get_channel_name(client, id), id, channel
 
-            unmuted_channels = [channel for name, channel in channels.iteritems() if name not in muted_channels]
+            unmuted_channels = [channel for id, channel in channels.iteritems() if id not in muted_channels]
 
             if any(channel.is_highlighted() for channel in channels.itervalues()):
                 tray_icon.set_color("red")
@@ -307,12 +390,32 @@ def main():
             last_pong = 0
 
         if time.time() - last_pong > 60:
-            print "lost connection, reconnecting..."
-            client.rtm_connect()
+            try:
+                print "lost connection, reconnecting..."
+                client.rtm_connect()
+            except socket.error:
+                # we'll end up retrying after 60 seconds with no pong
+                pass
+
             last_pong = time.time()
 
         time.sleep(0.2)
 
+
+def main():
+    try:
+        mainLoop()
+    except KeyboardInterrupt:
+        raise
+    except:
+        print >> sys.stderr, "main loop crashed!"
+        traceback.print_exc()
+
+        time.sleep(3)
+        print >> sys.stderr, "restarting"
+        print >> sys.stderr
+
+        os.execv(sys.argv[0], sys.argv)
 
 if __name__ == '__main__':
     gobject.threads_init()
